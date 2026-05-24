@@ -12,13 +12,13 @@
  *     ซ่อมแอร์ , 800  , ...
  *     ติดตั้งแอร์, 2500, ...
  *
- * ⚠️ ต้องตั้งค่าแชร์ชีตเป็น "ทุกคนที่มีลิงก์ = ผู้ดู (Viewer)"
- *    หรือ เผยแพร่ไปยังเว็บ (Publish to web) ระบบจึงจะดึงได้
+ * ใช้ลิงก์ "เผยแพร่ไปยังเว็บ → CSV" (Publish to web) ซึ่งเข้าถึงสาธารณะได้
+ * และดึงข้อมูลข้ามโดเมนได้ (CORS) — แก้ราคาในชีตแล้วระบบจะอัปเดตตามอัตโนมัติ
+ * (Google แคชไฟล์เผยแพร่ราว 1–5 นาที การเปลี่ยนแปลงจึงอาจหน่วงเล็กน้อย)
  * =============================================================== */
-const SHEET_ID = '15Bfsk4jtqTDili07wCCqIpYb_JU80WYUt32fGmNR8LE';
-const SHEET_GID = '0';
 const SHEET_CSV_URL =
-  `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
+  'https://docs.google.com/spreadsheets/d/e/2PACX-1vSexxfuCO0RyTHa2qy9Y4ZrDWE-YdUKhs0QgdFJ12hNTyjXnLOPB0k_A_ZzMQ2kz03kPm4m7QIb6rbR/pub?output=csv';
+const POLL_MS = 30000;   // ดึงราคาซ้ำทุก 30 วินาที เพื่ออัปเดตขณะเปิดหน้าค้างไว้
 
 /* แปลงชื่อบริการในชีต (อังกฤษ) ให้แสดงเป็นไทยใน UI — ชื่ออื่นจะแสดงตามชีต */
 const LABEL_MAP = {
@@ -150,6 +150,8 @@ function buildTable(rows) {
 }
 
 async function loadPricing() {
+  // อย่ารีเฟรชตัวเลือกขณะเปิดใบยืนยันการจอง (กันรบกวนระหว่างยืนยัน)
+  if (!els.modal.classList.contains('hidden')) return;
   try {
     const res = await fetch(SHEET_CSV_URL + '&_=' + Date.now(), { cache: 'no-store' });
     if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -438,4 +440,5 @@ function setDefaultDate() {
 setDefaultDate();
 addItem();
 recalc();
-loadPricing();   // ดึงราคาล่าสุดจากชีตทุกครั้งที่เปิดหน้า
+loadPricing();                       // ดึงราคาล่าสุดเมื่อเปิดหน้า
+setInterval(loadPricing, POLL_MS);   // และอัปเดตซ้ำเป็นระยะขณะเปิดหน้าค้างไว้
