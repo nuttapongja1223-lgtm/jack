@@ -20,6 +20,16 @@ const SHEET_GID = '0';
 const SHEET_CSV_URL =
   `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
 
+/* แปลงชื่อบริการในชีต (อังกฤษ) ให้แสดงเป็นไทยใน UI — ชื่ออื่นจะแสดงตามชีต */
+const LABEL_MAP = {
+  wash: 'ล้างแอร์',
+  clean: 'ล้างแอร์',
+  repair: 'ซ่อมแอร์',
+  fix: 'ซ่อมแอร์',
+  install: 'ติดตั้งแอร์',
+  installation: 'ติดตั้งแอร์',
+};
+
 /* ราคาสำรอง (ใช้เมื่อโหลดชีตไม่สำเร็จ) */
 const DEFAULT_SERVICES = {
   'ล้างแอร์':   { label: 'ล้างแอร์',   prices: { '9000': 500,  '12000': 600,  '18000': 800,  '24000': 1000, '36000': 1400 } },
@@ -128,7 +138,8 @@ function buildTable(rows) {
       const v = toNumber(clean[r][s.col]);
       if (v !== null) prices[s.value] = v;
     });
-    if (Object.keys(prices).length) services[name] = { label: name, prices };
+    const label = LABEL_MAP[name.toLowerCase()] || name;
+    if (Object.keys(prices).length) services[name] = { label, prices };
   }
   if (Object.keys(services).length === 0) throw new Error('ไม่พบรายการบริการในชีต');
 
