@@ -18,7 +18,7 @@
  * =============================================================== */
 const SHEET_CSV_URL =
   'https://docs.google.com/spreadsheets/d/e/2PACX-1vSexxfuCO0RyTHa2qy9Y4ZrDWE-YdUKhs0QgdFJ12hNTyjXnLOPB0k_A_ZzMQ2kz03kPm4m7QIb6rbR/pub?output=csv';
-const POLL_MS = 30000;   // ดึงราคาซ้ำทุก 30 วินาที เพื่ออัปเดตขณะเปิดหน้าค้างไว้
+const POLL_MS = 15000;   // ดึงราคาซ้ำทุก 15 วินาที เพื่ออัปเดตขณะเปิดหน้าค้างไว้
 
 /* แปลงชื่อบริการในชีต (อังกฤษ) ให้แสดงเป็นไทยใน UI — ชื่ออื่นจะแสดงตามชีต */
 const LABEL_MAP = {
@@ -72,6 +72,7 @@ const els = {
   sumTravelLabel: document.getElementById('sumTravelLabel'),
   sumTotal:     document.getElementById('sumTotal'),
   form:         document.getElementById('bookingForm'),
+  refreshPrice: document.getElementById('refreshPrice'),
   custName:     document.getElementById('custName'),
   custPhone:    document.getElementById('custPhone'),
   custAddress:  document.getElementById('custAddress'),
@@ -400,6 +401,10 @@ els.itemsList.addEventListener('click', (e) => {
 els.itemsList.addEventListener('input', recalc);
 els.itemsList.addEventListener('change', recalc);
 els.distance.addEventListener('change', recalc);
+els.refreshPrice.addEventListener('click', async () => {
+  setStatus('กำลังรีเฟรชราคา…', 'ok');
+  await loadPricing();
+});
 
 els.form.addEventListener('submit', (e) => {
   e.preventDefault();

@@ -101,7 +101,14 @@
               </button>
             </div>
             <div id="itemsList" class="space-y-3"></div>
-            <p id="priceStatus" class="mt-2 text-[13px] text-muted">กำลังโหลดราคาล่าสุดจากชีต…</p>
+            <div class="mt-2 flex items-center gap-2 flex-wrap">
+              <p id="priceStatus" class="text-[13px] text-muted">กำลังโหลดราคาล่าสุดจากชีต…</p>
+              <button type="button" id="refreshPrice"
+                class="inline-flex items-center gap-1 h-7 px-2.5 rounded-lg bg-surface border border-line text-[12px] font-medium hover:bg-accent transition-colors focus:outline-none focus:ring-2 focus:ring-ink focus:ring-offset-2 focus:ring-offset-canvas">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v5h-5"/></svg>
+                รีเฟรชราคา
+              </button>
+            </div>
             <p id="itemsError" class="hidden mt-2 text-[13px] text-[#DC2626]">กรุณาเลือกประเภทบริการและขนาดแอร์อย่างน้อย 1 รายการ</p>
           </section>
 
