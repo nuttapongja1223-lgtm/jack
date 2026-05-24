@@ -1,21 +1,42 @@
 'use strict';
 
-/* ---------------------------------------------------------------
- * ข้อมูลเรทค่าบริการ (บาท) แยกตามประเภทบริการ × ขนาดแอร์
- * --------------------------------------------------------------- */
-const SERVICES = {
-  clean:   { label: 'ล้างแอร์',   prices: { 9000: 500,  12000: 600,  18000: 800,  24000: 1000, 36000: 1400 } },
-  repair:  { label: 'ซ่อมแอร์',   prices: { 9000: 800,  12000: 900,  18000: 1100, 24000: 1300, 36000: 1700 } },
-  install: { label: 'ติดตั้งแอร์', prices: { 9000: 2500, 12000: 2800, 18000: 3500, 24000: 4200, 36000: 5500 } },
-};
+/* ===============================================================
+ * แหล่งราคา: Google Sheet (ดึงสดทุกครั้งที่เปิดหน้า)
+ * ---------------------------------------------------------------
+ * โครงสร้างตารางที่รองรับ:
+ *   - แถวบนสุด (header): ช่องแรกเว้นว่าง/ชื่ออะไรก็ได้ ช่องถัดไป = ขนาด BTU
+ *   - แถวถัดมา: ช่องแรก = ชื่อบริการ ช่องถัดไป = ราคาในแต่ละขนาด
+ *   ตัวอย่าง:
+ *     บริการ , 9000 , 12000 , 18000 , 24000 , 36000
+ *     ล้างแอร์ , 700  , 900   , 1100  , 1400  , 1800
+ *     ซ่อมแอร์ , 800  , ...
+ *     ติดตั้งแอร์, 2500, ...
+ *
+ * ⚠️ ต้องตั้งค่าแชร์ชีตเป็น "ทุกคนที่มีลิงก์ = ผู้ดู (Viewer)"
+ *    หรือ เผยแพร่ไปยังเว็บ (Publish to web) ระบบจึงจะดึงได้
+ * =============================================================== */
+const SHEET_ID = '15Bfsk4jtqTDili07wCCqIpYb_JU80WYUt32fGmNR8LE';
+const SHEET_GID = '0';
+const SHEET_CSV_URL =
+  `https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?tqx=out:csv&gid=${SHEET_GID}`;
 
-const SIZES = [
-  { value: 9000,  label: '9,000 BTU' },
-  { value: 12000, label: '12,000 BTU' },
-  { value: 18000, label: '18,000 BTU' },
-  { value: 24000, label: '24,000 BTU' },
-  { value: 36000, label: '36,000 BTU ขึ้นไป' },
+/* ราคาสำรอง (ใช้เมื่อโหลดชีตไม่สำเร็จ) */
+const DEFAULT_SERVICES = {
+  'ล้างแอร์':   { label: 'ล้างแอร์',   prices: { '9000': 500,  '12000': 600,  '18000': 800,  '24000': 1000, '36000': 1400 } },
+  'ซ่อมแอร์':   { label: 'ซ่อมแอร์',   prices: { '9000': 800,  '12000': 900,  '18000': 1100, '24000': 1300, '36000': 1700 } },
+  'ติดตั้งแอร์': { label: 'ติดตั้งแอร์', prices: { '9000': 2500, '12000': 2800, '18000': 3500, '24000': 4200, '36000': 5500 } },
+};
+const DEFAULT_SIZES = [
+  { value: '9000',  label: '9,000 BTU' },
+  { value: '12000', label: '12,000 BTU' },
+  { value: '18000', label: '18,000 BTU' },
+  { value: '24000', label: '24,000 BTU' },
+  { value: '36000', label: '36,000 BTU' },
 ];
+
+// ตารางราคาที่ใช้งานจริง (ถูกแทนที่ด้วยข้อมูลจากชีตเมื่อโหลดสำเร็จ)
+let SERVICES = JSON.parse(JSON.stringify(DEFAULT_SERVICES));
+let SIZES = DEFAULT_SIZES.slice();
 
 // ค่าเดินทางตามช่วงระยะทาง (คิดครั้งเดียวต่อออร์เดอร์)
 const DISTANCES = [
@@ -32,6 +53,7 @@ let uid = 0;
 const els = {
   itemsList:    document.getElementById('itemsList'),
   itemsError:   document.getElementById('itemsError'),
+  priceStatus:  document.getElementById('priceStatus'),
   addItemBtn:   document.getElementById('addItemBtn'),
   distance:     document.getElementById('distance'),
   summaryItems: document.getElementById('summaryItems'),
@@ -52,7 +74,96 @@ const els = {
   newBtn:       document.getElementById('newBtn'),
 };
 
-/* ---------- เติมตัวเลือกระยะทาง ---------- */
+/* ===============================================================
+ * ดึง + แปลงราคาจากชีต
+ * =============================================================== */
+function parseCSV(text) {
+  const rows = [];
+  let row = [], cur = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+      else cur += c;
+    } else if (c === '"') { q = true; }
+    else if (c === ',') { row.push(cur); cur = ''; }
+    else if (c === '\n') { row.push(cur); rows.push(row); row = []; cur = ''; }
+    else if (c === '\r') { /* skip */ }
+    else cur += c;
+  }
+  if (cur !== '' || row.length) { row.push(cur); rows.push(row); }
+  return rows;
+}
+
+function formatBtu(raw) {
+  const num = String(raw).replace(/[^0-9]/g, '');
+  return num ? Number(num).toLocaleString('th-TH') + ' BTU' : String(raw).trim();
+}
+function toNumber(raw) {
+  const n = parseFloat(String(raw).replace(/[^0-9.]/g, ''));
+  return isNaN(n) ? null : n;
+}
+
+// แปลงแถว CSV -> { services, sizes }
+function buildTable(rows) {
+  const clean = rows.filter((r) => r.some((c) => String(c).trim() !== ''));
+  if (clean.length < 2) throw new Error('ข้อมูลในชีตไม่พอ');
+
+  const header = clean[0];
+  const sizeCols = [];
+  for (let i = 1; i < header.length; i++) {
+    const raw = String(header[i]).trim();
+    if (raw === '') continue;
+    const num = String(raw).replace(/[^0-9]/g, '');
+    sizeCols.push({ col: i, value: num || raw, label: formatBtu(raw) });
+  }
+  if (sizeCols.length === 0) throw new Error('ไม่พบคอลัมน์ขนาดในแถวหัวตาราง');
+
+  const services = {};
+  for (let r = 1; r < clean.length; r++) {
+    const name = String(clean[r][0] || '').trim();
+    if (!name) continue;
+    const prices = {};
+    sizeCols.forEach((s) => {
+      const v = toNumber(clean[r][s.col]);
+      if (v !== null) prices[s.value] = v;
+    });
+    if (Object.keys(prices).length) services[name] = { label: name, prices };
+  }
+  if (Object.keys(services).length === 0) throw new Error('ไม่พบรายการบริการในชีต');
+
+  return {
+    services,
+    sizes: sizeCols.map((s) => ({ value: s.value, label: s.label })),
+  };
+}
+
+async function loadPricing() {
+  try {
+    const res = await fetch(SHEET_CSV_URL + '&_=' + Date.now(), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const text = await res.text();
+    const { services, sizes } = buildTable(parseCSV(text));
+    SERVICES = services;
+    SIZES = sizes;
+    refreshOptions();
+    recalc();
+    setStatus(`ราคาอัปเดตจากชีตแล้ว · ${new Date().toLocaleTimeString('th-TH')}`, 'ok');
+  } catch (err) {
+    setStatus('โหลดราคาจากชีตไม่สำเร็จ — ใช้ราคาสำรอง (ตรวจสอบการตั้งค่าแชร์ชีต)', 'warn');
+    console.warn('loadPricing:', err);
+  }
+}
+
+function setStatus(msg, kind) {
+  els.priceStatus.textContent = msg;
+  els.priceStatus.className =
+    'mt-2 text-[13px] ' + (kind === 'warn' ? 'text-[#B45309]' : 'text-muted');
+}
+
+/* ===============================================================
+ * ตัวเลือกระยะทาง
+ * =============================================================== */
 DISTANCES.forEach((d) => {
   const opt = document.createElement('option');
   opt.value = d.value;
@@ -60,17 +171,32 @@ DISTANCES.forEach((d) => {
   els.distance.appendChild(opt);
 });
 
-/* ---------- สร้างแถวรายการบริการ ---------- */
+/* ===============================================================
+ * แถวรายการบริการ
+ * =============================================================== */
 const fieldClass =
   'field w-full text-[14px] bg-surface border border-line rounded-lg px-3 py-2 appearance-none';
 
-function serviceOptions() {
+function serviceOptionsHtml() {
   return '<option value="" disabled selected>เลือกบริการ</option>' +
-    Object.entries(SERVICES).map(([k, v]) => `<option value="${k}">${v.label}</option>`).join('');
+    Object.keys(SERVICES).map((k) => `<option value="${escapeAttr(k)}">${escapeHtml(SERVICES[k].label)}</option>`).join('');
 }
-function sizeOptions() {
+function sizeOptionsHtml() {
   return '<option value="" disabled selected>เลือกขนาด</option>' +
-    SIZES.map((s) => `<option value="${s.value}">${s.label}</option>`).join('');
+    SIZES.map((s) => `<option value="${escapeAttr(s.value)}">${escapeHtml(s.label)}</option>`).join('');
+}
+
+// อัปเดต option ของทุกแถวหลังโหลดราคาจากชีต โดยพยายามคงค่าที่เลือกไว้
+function refreshOptions() {
+  els.itemsList.querySelectorAll('.item').forEach((row) => {
+    const svcSel = row.querySelector('.js-service');
+    const sizeSel = row.querySelector('.js-size');
+    const svcVal = svcSel.value, sizeVal = sizeSel.value;
+    svcSel.innerHTML = serviceOptionsHtml();
+    sizeSel.innerHTML = sizeOptionsHtml();
+    if (svcVal && SERVICES[svcVal]) svcSel.value = svcVal;
+    if (sizeVal && SIZES.some((s) => s.value === sizeVal)) sizeSel.value = sizeVal;
+  });
 }
 
 function addItem() {
@@ -81,11 +207,11 @@ function addItem() {
   row.innerHTML = `
     <label class="block">
       <span class="block text-[13px] font-medium text-muted mb-1">ประเภทบริการ</span>
-      <select class="js-service ${fieldClass}">${serviceOptions()}</select>
+      <select class="js-service ${fieldClass}">${serviceOptionsHtml()}</select>
     </label>
     <label class="block">
       <span class="block text-[13px] font-medium text-muted mb-1">ขนาดแอร์</span>
-      <select class="js-size ${fieldClass}">${sizeOptions()}</select>
+      <select class="js-size ${fieldClass}">${sizeOptionsHtml()}</select>
     </label>
     <label class="block">
       <span class="block text-[13px] font-medium text-muted mb-1">จำนวน</span>
@@ -98,7 +224,9 @@ function addItem() {
   recalc();
 }
 
-/* ---------- คำนวณราคา ---------- */
+/* ===============================================================
+ * คำนวณราคา
+ * =============================================================== */
 function readItems() {
   return [...els.itemsList.querySelectorAll('.item')].map((row) => {
     const service = row.querySelector('.js-service').value;
@@ -112,21 +240,20 @@ function readItems() {
 
 function recalc() {
   const items = readItems();
-  const valid = items.filter((i) => i.service && i.size);
+  const valid = items.filter((i) => i.service && i.size && i.unit > 0);
   const servicesTotal = valid.reduce((s, i) => s + i.total, 0);
   const dist = DISTANCES.find((d) => d.value === els.distance.value) || DISTANCES[0];
   const travel = dist.fee;
   const total = servicesTotal + travel;
 
-  // สรุปฝั่งขวา
   if (valid.length === 0) {
     els.summaryItems.innerHTML =
       '<div class="rounded-lg border border-dashed border-[rgba(0,0,0,0.15)] p-4 text-center text-[13px] text-muted">ยังไม่มีรายการบริการ</div>';
   } else {
     els.summaryItems.innerHTML = valid.map((i) => {
-      const sizeLabel = (SIZES.find((s) => String(s.value) === i.size) || {}).label || '';
+      const sizeLabel = (SIZES.find((s) => s.value === i.size) || {}).label || '';
       return `<div class="flex justify-between gap-2">
-          <span>${SERVICES[i.service].label} · ${sizeLabel}${i.qty > 1 ? ` ×${i.qty}` : ''}</span>
+          <span>${escapeHtml(SERVICES[i.service].label)} · ${escapeHtml(sizeLabel)}${i.qty > 1 ? ` ×${i.qty}` : ''}</span>
           <span class="whitespace-nowrap">${baht(i.total)}</span>
         </div>`;
     }).join('');
@@ -140,7 +267,9 @@ function recalc() {
   return { items, valid, servicesTotal, travel, total, dist };
 }
 
-/* ---------- ตรวจสอบความถูกต้อง ---------- */
+/* ===============================================================
+ * ตรวจสอบความถูกต้อง
+ * =============================================================== */
 function showError(input, on) {
   input.classList.toggle('invalid', on);
   const err = input.parentElement.querySelector('.err');
@@ -175,7 +304,9 @@ function validate(calc) {
   return ok;
 }
 
-/* ---------- หมายเลขจอง ---------- */
+/* ===============================================================
+ * หมายเลขจอง + ใบยืนยัน
+ * =============================================================== */
 function genBookingNo() {
   const d = new Date();
   const ymd = d.getFullYear().toString().slice(2) +
@@ -191,14 +322,13 @@ function fmtDateTime() {
   return `${date} เวลา ${els.svcTime.value} น.`;
 }
 
-/* ---------- แสดงใบยืนยัน ---------- */
 function showReceipt(calc) {
   els.bookingNo.textContent = genBookingNo();
 
   const lines = calc.valid.map((i) => {
-    const sizeLabel = (SIZES.find((s) => String(s.value) === i.size) || {}).label || '';
+    const sizeLabel = (SIZES.find((s) => s.value === i.size) || {}).label || '';
     return `<div class="flex justify-between gap-2">
-        <span>${SERVICES[i.service].label} · ${sizeLabel} ${i.qty > 1 ? `(${baht(i.unit)} ×${i.qty})` : ''}</span>
+        <span>${escapeHtml(SERVICES[i.service].label)} · ${escapeHtml(sizeLabel)} ${i.qty > 1 ? `(${baht(i.unit)} ×${i.qty})` : ''}</span>
         <span class="whitespace-nowrap font-medium">${baht(i.total)}</span>
       </div>`;
   }).join('');
@@ -233,17 +363,19 @@ function showReceipt(calc) {
 }
 
 function escapeHtml(s) {
-  return s.replace(/[&<>"']/g, (c) =>
+  return String(s).replace(/[&<>"']/g, (c) =>
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
+function escapeAttr(s) { return escapeHtml(s); }
 
-/* ---------- เหตุการณ์ ---------- */
+/* ===============================================================
+ * เหตุการณ์
+ * =============================================================== */
 els.addItemBtn.addEventListener('click', addItem);
 els.itemsList.addEventListener('click', (e) => {
   const btn = e.target.closest('.js-remove');
   if (!btn) return;
   if (els.itemsList.querySelectorAll('.item').length <= 1) {
-    // เก็บไว้อย่างน้อย 1 แถว แต่ล้างค่า
     const row = btn.closest('.item');
     row.querySelectorAll('select').forEach((s) => (s.selectedIndex = 0));
     row.querySelector('.js-qty').value = 1;
@@ -284,7 +416,9 @@ els.modal.addEventListener('click', (e) => {
   if (e.target === els.modal) { els.modal.classList.add('hidden'); document.body.style.overflow = ''; }
 });
 
-/* ---------- ค่าเริ่มต้น ---------- */
+/* ===============================================================
+ * ค่าเริ่มต้น
+ * =============================================================== */
 function setDefaultDate() {
   const d = new Date();
   els.svcDate.min = d.toISOString().slice(0, 10);
@@ -293,3 +427,4 @@ function setDefaultDate() {
 setDefaultDate();
 addItem();
 recalc();
+loadPricing();   // ดึงราคาล่าสุดจากชีตทุกครั้งที่เปิดหน้า
